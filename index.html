@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gatepass Closure Monitor</title>
+
+<!-- ============================ CONFIG: EDIT THESE TWO LINES ============================ -->
+<script>
+  const API_BASE = 'https://script.google.com/macros/s/AKfycbzMKEqLqU55L4q_Z7EQ9BQGfxrx-SD8-gxRlmhL1cu9sCCRgegNMW2l2GUEgAmrrlfr/exec';
+  const API_TOKEN = '';   // No token required. Only fill this if you set an API_TOKEN in the Config sheet.
+</script>
+<!-- ===================================================================================== -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+  :root{
+    --bg:#EEF1F4; --surface:#FFFFFF; --ink:#16202B; --muted:#5C6B7A; --hair:#DCE3E9;
+    --teal:#0E7C66; --teal-soft:#0E7C661a; --warn:#C2410C; --warn-soft:#C2410C1a;
+    --steel:#2563A8; --steel-soft:#2563A81a; --shadow:0 1px 2px #16202b14,0 8px 24px #16202b0d;
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .num{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .wrap{max-width:1240px;margin:0 auto;padding:20px 18px 64px}
+
+  /* Header */
+  header{display:flex;flex-wrap:wrap;align-items:center;gap:14px 18px;padding:18px 20px;background:var(--surface);
+    border:1px solid var(--hair);border-radius:var(--r);box-shadow:var(--shadow);margin-bottom:20px}
+  .brand{display:flex;align-items:center;gap:12px;margin-right:auto}
+  .mark{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,var(--teal),#0a5a4a);
+    display:grid;place-items:center;color:#fff;font-family:"Space Grotesk";font-weight:700;font-size:18px}
+  .brand h1{font-family:"Space Grotesk";font-size:18px;font-weight:700;margin:0;letter-spacing:-.2px}
+  .brand p{margin:2px 0 0;font-size:12.5px;color:var(--muted)}
+  .meta{display:flex;flex-direction:column;align-items:flex-end;font-size:12px;color:var(--muted);line-height:1.5}
+  .meta b{color:var(--ink);font-family:"IBM Plex Mono"}
+  button.refresh{font-family:Inter;font-weight:600;font-size:13px;color:#fff;background:var(--ink);
+    border:0;border-radius:9px;padding:9px 16px;cursor:pointer}
+  button.refresh:hover{background:#0c161f}
+  button.refresh:disabled{opacity:.5;cursor:default}
+
+  /* Section heads */
+  .sec{margin:30px 0 14px;display:flex;align-items:baseline;gap:12px}
+  .sec .eyebrow{font-family:"IBM Plex Mono";font-size:11px;letter-spacing:2px;color:var(--teal);text-transform:uppercase}
+  .sec h2{font-family:"Space Grotesk";font-size:17px;font-weight:600;margin:0}
+  .sec .line{flex:1;height:1px;background:var(--hair)}
+
+  /* KPI grid */
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  .kpi{background:var(--surface);border:1px solid var(--hair);border-radius:var(--r);padding:15px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .kpi .label{font-size:12px;color:var(--muted);font-weight:500;line-height:1.3;min-height:31px}
+  .kpi .val{font-family:"IBM Plex Mono";font-weight:600;font-size:27px;margin-top:8px;letter-spacing:-.5px}
+  .kpi .sub{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .kpi.accent-teal::before,.kpi.accent-warn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+  .kpi.accent-teal::before{background:var(--teal)} .kpi.accent-teal .val{color:var(--teal)}
+  .kpi.accent-warn::before{background:var(--warn)} .kpi.accent-warn .val{color:var(--warn)}
+  /* compliance gauge inside the >=15% card */
+  .gauge{height:6px;border-radius:6px;background:var(--hair);margin-top:10px;overflow:hidden}
+  .gauge>i{display:block;height:100%;background:var(--warn);border-radius:6px}
+
+  /* Charts */
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr} .g3{grid-template-columns:1fr 1fr 1fr}
+  .card{background:var(--surface);border:1px solid var(--hair);border-radius:var(--r);padding:16px 18px 18px;box-shadow:var(--shadow)}
+  .card h3{font-family:"Space Grotesk";font-size:14px;font-weight:600;margin:0 0 2px}
+  .card .hint{font-size:12px;color:var(--muted);margin:0 0 12px}
+  .chartbox{position:relative;height:280px}
+
+  /* Downloads */
+  .dl{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .dl span{font-size:12.5px;color:var(--muted);margin-right:4px}
+  .dl button{font-family:Inter;font-size:12.5px;font-weight:600;color:var(--ink);background:var(--surface);
+    border:1px solid var(--hair);border-radius:8px;padding:8px 13px;cursor:pointer;box-shadow:var(--shadow)}
+  .dl button:hover{border-color:var(--teal);color:var(--teal)}
+
+  /* States */
+  #status{display:none;padding:40px;text-align:center;color:var(--muted);background:var(--surface);
+    border:1px solid var(--hair);border-radius:var(--r);box-shadow:var(--shadow)}
+  #status.show{display:block}
+  #status .big{font-family:"Space Grotesk";font-size:16px;color:var(--ink);margin-bottom:6px}
+  .spinner{width:26px;height:26px;border:3px solid var(--hair);border-top-color:var(--teal);border-radius:50%;
+    margin:0 auto 14px;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #content{display:none} #content.show{display:block}
+
+  @media(max-width:1000px){.kpis{grid-template-columns:repeat(3,1fr)}.g3{grid-template-columns:1fr}.g2{grid-template-columns:1fr}}
+  @media(max-width:560px){.kpis{grid-template-columns:repeat(2,1fr)}.kpi .val{font-size:23px}.meta{align-items:flex-start}}
+  @media(prefers-reduced-motion:reduce){.spinner{animation:none}}
+  :focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <div class="mark">GP</div>
+      <div><h1>Gatepass Closure Monitor</h1>
+        <p>Returnable stock-transfer closures · previous day</p></div>
+    </div>
+    <div class="meta">
+      <div>Closures dated <b id="dataDate">—</b></div>
+      <div>Refreshed <b id="lastUpdated">—</b></div>
+    </div>
+    <button class="refresh" id="refreshBtn" onclick="load()">Refresh</button>
+  </header>
+
+  <div id="status" class="show">
+    <div class="spinner"></div>
+    <div class="big">Loading dashboard…</div>
+    <div>Fetching the latest closure data.</div>
+  </div>
+
+  <div id="content">
+    <!-- SECTION 1: KPI OVERVIEW -->
+    <div class="sec"><span class="eyebrow">01</span><h2>KPI Overview</h2><div class="line"></div></div>
+    <div class="kpis" id="kpiGrid"></div>
+
+    <!-- SECTION 2: CREATED BY ANALYSIS -->
+    <div class="sec"><span class="eyebrow">02</span><h2>Created By Analysis</h2><div class="line"></div></div>
+    <div class="grid g2">
+      <div class="card"><h3>Top creators by received quantity</h3><p class="hint">Sum of received qty per creator</p><div class="chartbox"><canvas id="cQty"></canvas></div></div>
+      <div class="card"><h3>Top creators by gatepass count</h3><p class="hint">Distinct gatepasses closed per creator</p><div class="chartbox"><canvas id="cCount"></canvas></div></div>
+    </div>
+    <div class="grid" style="margin-top:14px">
+      <div class="card"><h3>Ageing split by creator</h3><p class="hint">Gatepass count per creator, split &lt;15 vs &ge;15 days</p><div class="chartbox" style="height:320px"><canvas id="cStack"></canvas></div></div>
+    </div>
+
+    <!-- SECTION 3: AGEING ANALYSIS -->
+    <div class="sec"><span class="eyebrow">03</span><h2>Ageing Analysis</h2><div class="line"></div></div>
+    <div class="grid g2">
+      <div class="card"><h3>Ageing bucket split</h3><p class="hint">Share of gatepasses by ageing bucket</p><div class="chartbox"><canvas id="cBucket"></canvas></div></div>
+      <div class="card"><h3>Average ageing by creator</h3><p class="hint">Mean ageing days per creator</p><div class="chartbox"><canvas id="cAvg"></canvas></div></div>
+    </div>
+    <div class="grid" style="margin-top:14px">
+      <div class="card"><h3>Ageing distribution</h3><p class="hint">Gatepasses by ageing-day range</p><div class="chartbox"><canvas id="cHist"></canvas></div></div>
+    </div>
+
+    <!-- DOWNLOADS -->
+    <div class="sec"><span class="eyebrow">04</span><h2>Downloads</h2><div class="line"></div></div>
+    <div class="card dl">
+      <span>Created By Summary</span>
+      <button onclick="dl('createdBy','csv')">CSV</button><button onclick="dl('createdBy','xlsx')">Excel</button>
+      <span style="margin-left:14px">Party Summary</span>
+      <button onclick="dl('party','csv')">CSV</button><button onclick="dl('party','xlsx')">Excel</button>
+      <span style="margin-left:14px">Detailed Data</span>
+      <button onclick="dl('detail','csv')">CSV</button><button onclick="dl('detail','xlsx')">Excel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const C = { teal:'#0E7C66', warn:'#C2410C', steel:'#2563A8', ink:'#16202B', muted:'#5C6B7A', hair:'#DCE3E9' };
+let DATA = null, charts = {};
+Chart.defaults.font.family = 'Inter, sans-serif';
+Chart.defaults.color = C.muted;
+
+function showStatus(title, msg, spin){
+  const s=document.getElementById('status');
+  s.classList.add('show'); document.getElementById('content').classList.remove('show');
+  s.innerHTML = (spin?'<div class="spinner"></div>':'') +
+    '<div class="big">'+title+'</div><div>'+msg+'</div>';
+}
+
+async function load(){
+  const btn=document.getElementById('refreshBtn'); btn.disabled=true;
+  showStatus('Loading dashboard…','Fetching the latest closure data.',true);
+  if(API_BASE.indexOf('PASTE_')===0){
+    showStatus('Set the API URL','Open index.html and paste your Apps Script /exec URL and token into the CONFIG block at the top.',false);
+    btn.disabled=false; return;
+  }
+  try{
+    const res = await fetch(API_BASE+'?token='+encodeURIComponent(API_TOKEN));
+    const j = await res.json();
+    if(!j.ok) throw new Error(j.error||'Request failed');
+    DATA = j.data;
+    render(DATA);
+    document.getElementById('status').classList.remove('show');
+    document.getElementById('content').classList.add('show');
+  }catch(err){
+    showStatus('Could not load data', String(err.message||err)+'. Check the API URL, token, and that the daily job has run.',false);
+  }
+  btn.disabled=false;
+}
+
+/* ---- derive gatepass-level rows from line-level detail ---- */
+function gatepassRows(detail){
+  const m={};
+  detail.forEach(r=>{
+    const code=r['Gatepass Code'];
+    if(!m[code]) m[code]={code,by:r['Gatepass Created By'],age:+r['Ageing Days']||0,bucket:r['Ageing Bucket'],qty:0};
+    m[code].qty += (+r['Received Quantity']||0);
+  });
+  return Object.values(m);
+}
+
+function render(d){
+  document.getElementById('dataDate').textContent   = isoDmy(d.meta.dataDate);
+  document.getElementById('lastUpdated').textContent= d.meta.lastUpdated||'—';
+  renderKpis(d.kpis);
+  const gp = gatepassRows(d.detail||[]);
+  renderCreatedBy(gp);
+  renderAgeing(gp,d.kpis);
+}
+
+function renderKpis(k){
+  const cards=[
+    {l:'Gatepasses closed yesterday',v:k.closedYesterday,a:''},
+    {l:'Total received quantity',v:fmt(k.totalRecvQty),a:''},
+    {l:'Unique creators',v:k.uniqueCreators,a:''},
+    {l:'Unique from-party codes',v:k.uniqueFromCodes,a:''},
+    {l:'Unique to-party codes',v:k.uniqueToCodes,a:''},
+    {l:'Average ageing days',v:k.avgAgeingDays,a:''},
+    {l:'Max ageing days',v:k.maxAgeingDays,a:'',sub:'Oldest open-to-close span'},
+    {l:'Gatepasses <15 days',v:k.lt15Count,a:'teal',sub:'On-track closures'},
+    {l:'Gatepasses ≥15 days',v:k.gte15Count,a:'warn',sub:'Aged closures'},
+    {l:'≥15-day share',v:k.gte15Pct+'%',a:'warn',gauge:k.gte15Pct}
+  ];
+  document.getElementById('kpiGrid').innerHTML = cards.map(c=>(
+    '<div class="kpi '+(c.a?('accent-'+c.a):'')+'">'+
+      '<div class="label">'+c.l+'</div>'+
+      '<div class="val num">'+c.v+'</div>'+
+      (c.gauge!=null?'<div class="gauge"><i style="width:'+Math.min(100,c.gauge)+'%"></i></div>':
+        (c.sub?'<div class="sub">'+c.sub+'</div>':''))+
+    '</div>')).join('');
+}
+
+function topN(arr,key,n){return arr.slice().sort((a,b)=>b[key]-a[key]).slice(0,n);}
+function destroy(id){if(charts[id]){charts[id].destroy();}}
+
+function renderCreatedBy(gp){
+  // aggregate per creator
+  const by={};
+  gp.forEach(g=>{const s=by[g.by]||(by[g.by]={by:g.by,qty:0,count:0,lt15:0,gte15:0,ageSum:0});
+    s.qty+=g.qty;s.count++;s.ageSum+=g.age; g.bucket==='>=15 Days'?s.gte15++:s.lt15++;});
+  const arr=Object.values(by).map(s=>(s.avg=s.count?+(s.ageSum/s.count).toFixed(1):0,s));
+
+  const byQty=topN(arr,'qty',10);
+  bar('cQty',byQty.map(x=>x.by),byQty.map(x=>x.qty),C.teal,'Received Qty');
+
+  const byCnt=topN(arr,'count',10);
+  bar('cCount',byCnt.map(x=>x.by),byCnt.map(x=>x.count),C.steel,'Gatepass Count');
+
+  const stk=topN(arr,'count',10);
+  destroy('cStack');
+  charts.cStack=new Chart(el('cStack'),{type:'bar',data:{labels:stk.map(x=>x.by),
+    datasets:[
+      {label:'<15 Days',data:stk.map(x=>x.lt15),backgroundColor:C.teal,borderRadius:4},
+      {label:'≥15 Days',data:stk.map(x=>x.gte15),backgroundColor:C.warn,borderRadius:4}
+    ]},
+    options:baseOpts({stacked:true,legend:true})});
+  window._creatorArr=arr;
+}
+
+function renderAgeing(gp,k){
+  // bucket doughnut
+  destroy('cBucket');
+  charts.cBucket=new Chart(el('cBucket'),{type:'doughnut',
+    data:{labels:['<15 Days','≥15 Days'],datasets:[{data:[k.lt15Count,k.gte15Count],
+      backgroundColor:[C.teal,C.warn],borderWidth:0}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'62%',
+      plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>c.label+': '+fmt(c.parsed)}}}}});
+
+  // avg ageing by creator (top 10 by avg, min 1 gatepass)
+  const arr=(window._creatorArr||[]).filter(x=>x.count>0);
+  const byAvg=topN(arr,'avg',10);
+  destroy('cAvg');
+  charts.cAvg=new Chart(el('cAvg'),{type:'bar',data:{labels:byAvg.map(x=>x.by),
+    datasets:[{data:byAvg.map(x=>x.avg),backgroundColor:byAvg.map(x=>x.avg>=15?C.warn:C.steel),borderRadius:4}]},
+    options:baseOpts({indexAxis:'y'})});
+
+  // histogram
+  const ranges=[['0–4',0,4],['5–9',5,9],['10–14',10,14],['15–19',15,19],['20–29',20,29],['30+',30,1e9]];
+  const counts=ranges.map(r=>gp.filter(g=>g.age>=r[1]&&g.age<=r[2]).length);
+  destroy('cHist');
+  charts.cHist=new Chart(el('cHist'),{type:'bar',data:{labels:ranges.map(r=>r[0]),
+    datasets:[{data:counts,backgroundColor:ranges.map(r=>r[1]>=15?C.warn:C.teal),borderRadius:4}]},
+    options:baseOpts({})});
+}
+
+/* chart helpers */
+function el(id){return document.getElementById(id).getContext('2d');}
+function bar(id,labels,data,color,label){
+  destroy(id);
+  charts[id]=new Chart(el(id),{type:'bar',data:{labels,datasets:[{label,data,backgroundColor:color,borderRadius:4}]},
+    options:baseOpts({})});
+}
+function baseOpts(o){
+  o=o||{};
+  return {responsive:true,maintainAspectRatio:false,indexAxis:o.indexAxis||'x',
+    plugins:{legend:{display:!!o.legend,position:'bottom'},
+      tooltip:{callbacks:{label:c=>(c.dataset.label?c.dataset.label+': ':'')+fmt(c.parsed[o.indexAxis==='y'?'x':'y'])}}},
+    scales:{
+      x:{stacked:!!o.stacked,grid:{display:o.indexAxis==='y'},ticks:{maxRotation:55,minRotation:0,autoSkip:false,font:{size:10}}},
+      y:{stacked:!!o.stacked,grid:{color:C.hair},ticks:{font:{size:11}},beginAtZero:true}
+    }};
+}
+
+/* ---- downloads ---- */
+function rowsFor(kind){
+  if(kind==='createdBy') return {name:'Created_By_Summary',rows:DATA.createdBy};
+  if(kind==='party')     return {name:'Party_Summary',rows:DATA.party};
+  return {name:'Detailed_Gatepass_Closure',rows:DATA.detail};
+}
+function dl(kind,type){
+  if(!DATA) return;
+  const {name,rows}=rowsFor(kind);
+  if(!rows||!rows.length){alert('Nothing to download for this dataset.');return;}
+  const fname=name+'_'+(DATA.meta.dataDate||'')+'.'+type;
+  if(type==='csv'){
+    const head=Object.keys(rows[0]);
+    const csv=[head.join(',')].concat(rows.map(r=>head.map(h=>csvCell(r[h])).join(','))).join('\n');
+    save(new Blob([csv],{type:'text/csv'}),fname);
+  }else{
+    const ws=XLSX.utils.json_to_sheet(rows);
+    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,name.slice(0,31));
+    XLSX.writeFile(wb,fname);
+  }
+}
+function csvCell(v){v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+function save(blob,fname){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname;a.click();URL.revokeObjectURL(a.href);}
+
+/* ---- format ---- */
+function fmt(n){return Number(n).toLocaleString('en-IN');}
+function isoDmy(iso){if(!iso)return '—';const p=String(iso).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:iso;}
+
+load();
+</script>
+</body>
+</html>
