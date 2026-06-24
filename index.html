@@ -147,7 +147,7 @@
     <div class="card dl">
       <span>Created By Summary</span>
       <button onclick="dl('createdBy','csv')">CSV</button><button onclick="dl('createdBy','xlsx')">Excel</button>
-      <span style="margin-left:14px">Party Summary</span>
+      <span style="margin-left:14px">Facility Summary</span>
       <button onclick="dl('party','csv')">CSV</button><button onclick="dl('party','xlsx')">Excel</button>
       <span style="margin-left:14px">Detailed Data</span>
       <button onclick="dl('detail','csv')">CSV</button><button onclick="dl('detail','xlsx')">Excel</button>
@@ -305,7 +305,7 @@ function baseOpts(o){
 /* ---- downloads ---- */
 function rowsFor(kind){
   if(kind==='createdBy') return {name:'Created_By_Summary',rows:DATA.createdBy};
-  if(kind==='party')     return {name:'Party_Summary',rows:DATA.party};
+  if(kind==='party')     return {name:'Facility_Summary',rows:DATA.party};
   return {name:'Detailed_Gatepass_Closure',rows:DATA.detail};
 }
 function dl(kind,type){
