@@ -57,10 +57,11 @@
   .kpi .label{font-size:12px;color:var(--muted);font-weight:500;line-height:1.3;min-height:31px}
   .kpi .val{font-family:"IBM Plex Mono";font-weight:600;font-size:27px;margin-top:8px;letter-spacing:-.5px}
   .kpi .sub{font-size:11.5px;color:var(--muted);margin-top:3px}
-  .kpi.accent-teal::before,.kpi.accent-warn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+  .kpi.accent-teal::before,.kpi.accent-steel::before,.kpi.accent-warn::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
   .kpi.accent-teal::before{background:var(--teal)} .kpi.accent-teal .val{color:var(--teal)}
+  .kpi.accent-steel::before{background:var(--steel)} .kpi.accent-steel .val{color:var(--steel)}
   .kpi.accent-warn::before{background:var(--warn)} .kpi.accent-warn .val{color:var(--warn)}
-  /* compliance gauge inside the >=15% card */
+  /* compliance gauge inside the >15% card */
   .gauge{height:6px;border-radius:6px;background:var(--hair);margin-top:10px;overflow:hidden}
   .gauge>i{display:block;height:100%;background:var(--warn);border-radius:6px}
 
@@ -129,7 +130,7 @@
       <div class="card"><h3>Top creators by gatepass count</h3><p class="hint">Distinct gatepasses closed per creator</p><div class="chartbox"><canvas id="cCount"></canvas></div></div>
     </div>
     <div class="grid" style="margin-top:14px">
-      <div class="card"><h3>Ageing split by creator</h3><p class="hint">Gatepass count per creator, split &lt;15 vs &ge;15 days</p><div class="chartbox" style="height:320px"><canvas id="cStack"></canvas></div></div>
+      <div class="card"><h3>Ageing split by creator</h3><p class="hint">Gatepass count per creator, split across the three ageing buckets</p><div class="chartbox" style="height:320px"><canvas id="cStack"></canvas></div></div>
     </div>
 
     <!-- SECTION 3: AGEING ANALYSIS -->
@@ -147,10 +148,8 @@
     <div class="card dl">
       <span>Created By Summary</span>
       <button onclick="dl('createdBy','csv')">CSV</button><button onclick="dl('createdBy','xlsx')">Excel</button>
-      <span style="margin-left:14px">Facility Summary</span>
+      <span style="margin-left:14px">Party Summary</span>
       <button onclick="dl('party','csv')">CSV</button><button onclick="dl('party','xlsx')">Excel</button>
-      <span style="margin-left:14px">Others (unmapped)</span>
-      <button onclick="dl('others','csv')">CSV</button><button onclick="dl('others','xlsx')">Excel</button>
       <span style="margin-left:14px">Detailed Data</span>
       <button onclick="dl('detail','csv')">CSV</button><button onclick="dl('detail','xlsx')">Excel</button>
     </div>
@@ -160,8 +159,12 @@
 <script>
 const C = { teal:'#0E7C66', warn:'#C2410C', steel:'#2563A8', ink:'#16202B', muted:'#5C6B7A', hair:'#DCE3E9' };
 let DATA = null, charts = {};
+// Bucket labels. Overwritten from the API (meta.buckets) so the dashboard always matches the backend.
+let B = { low:'0\u20137 Days', mid:'8\u201315 Days', high:'>15 Days' };
 Chart.defaults.font.family = 'Inter, sans-serif';
 Chart.defaults.color = C.muted;
+
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 function showStatus(title, msg, spin){
   const s=document.getElementById('status');
@@ -203,6 +206,7 @@ function gatepassRows(detail){
 }
 
 function render(d){
+  if(d.meta && d.meta.buckets && d.meta.buckets.low){ B = d.meta.buckets; }   // use backend labels
   document.getElementById('dataDate').textContent   = isoDmy(d.meta.dataDate);
   document.getElementById('lastUpdated').textContent= d.meta.lastUpdated||'—';
   renderKpis(d.kpis);
@@ -220,16 +224,17 @@ function renderKpis(k){
     {l:'Unique to-party codes',v:k.uniqueToCodes,a:''},
     {l:'Average ageing days',v:k.avgAgeingDays,a:''},
     {l:'Max ageing days',v:k.maxAgeingDays,a:'',sub:'Oldest open-to-close span'},
-    {l:'Gatepasses <15 days',v:k.lt15Count,a:'teal',sub:'On-track closures'},
-    {l:'Gatepasses ≥15 days',v:k.gte15Count,a:'warn',sub:'Aged closures'},
-    {l:'≥15-day share',v:k.gte15Pct+'%',a:'warn',gauge:k.gte15Pct}
+    {l:'Gatepasses '+B.low,v:k.lowCount,a:'teal',sub:'Freshest closures'},
+    {l:'Gatepasses '+B.mid,v:k.midCount,a:'steel',sub:'Mid-range closures'},
+    {l:'Gatepasses '+B.high,v:k.highCount,a:'warn',sub:'Aged closures'},
+    {l:B.high+' share',v:k.highPct+'%',a:'warn',gauge:k.highPct}
   ];
   document.getElementById('kpiGrid').innerHTML = cards.map(c=>(
     '<div class="kpi '+(c.a?('accent-'+c.a):'')+'">'+
-      '<div class="label">'+c.l+'</div>'+
+      '<div class="label">'+esc(c.l)+'</div>'+
       '<div class="val num">'+c.v+'</div>'+
       (c.gauge!=null?'<div class="gauge"><i style="width:'+Math.min(100,c.gauge)+'%"></i></div>':
-        (c.sub?'<div class="sub">'+c.sub+'</div>':''))+
+        (c.sub?'<div class="sub">'+esc(c.sub)+'</div>':''))+
     '</div>')).join('');
 }
 
@@ -237,10 +242,11 @@ function topN(arr,key,n){return arr.slice().sort((a,b)=>b[key]-a[key]).slice(0,n
 function destroy(id){if(charts[id]){charts[id].destroy();}}
 
 function renderCreatedBy(gp){
-  // aggregate per creator
+  // aggregate per creator, splitting into the three ageing buckets
   const by={};
-  gp.forEach(g=>{const s=by[g.by]||(by[g.by]={by:g.by,qty:0,count:0,lt15:0,gte15:0,ageSum:0});
-    s.qty+=g.qty;s.count++;s.ageSum+=g.age; g.bucket==='>=15 Days'?s.gte15++:s.lt15++;});
+  gp.forEach(g=>{const s=by[g.by]||(by[g.by]={by:g.by,qty:0,count:0,low:0,mid:0,high:0,ageSum:0});
+    s.qty+=g.qty;s.count++;s.ageSum+=g.age;
+    if(g.bucket===B.low)s.low++; else if(g.bucket===B.mid)s.mid++; else s.high++;});
   const arr=Object.values(by).map(s=>(s.avg=s.count?+(s.ageSum/s.count).toFixed(1):0,s));
 
   const byQty=topN(arr,'qty',10);
@@ -253,19 +259,20 @@ function renderCreatedBy(gp){
   destroy('cStack');
   charts.cStack=new Chart(el('cStack'),{type:'bar',data:{labels:stk.map(x=>x.by),
     datasets:[
-      {label:'<15 Days',data:stk.map(x=>x.lt15),backgroundColor:C.teal,borderRadius:4},
-      {label:'≥15 Days',data:stk.map(x=>x.gte15),backgroundColor:C.warn,borderRadius:4}
+      {label:B.low, data:stk.map(x=>x.low), backgroundColor:C.teal, borderRadius:4},
+      {label:B.mid, data:stk.map(x=>x.mid), backgroundColor:C.steel,borderRadius:4},
+      {label:B.high,data:stk.map(x=>x.high),backgroundColor:C.warn, borderRadius:4}
     ]},
     options:baseOpts({stacked:true,legend:true})});
   window._creatorArr=arr;
 }
 
 function renderAgeing(gp,k){
-  // bucket doughnut
+  // bucket doughnut (three segments)
   destroy('cBucket');
   charts.cBucket=new Chart(el('cBucket'),{type:'doughnut',
-    data:{labels:['<15 Days','≥15 Days'],datasets:[{data:[k.lt15Count,k.gte15Count],
-      backgroundColor:[C.teal,C.warn],borderWidth:0}]},
+    data:{labels:[B.low,B.mid,B.high],datasets:[{data:[k.lowCount,k.midCount,k.highCount],
+      backgroundColor:[C.teal,C.steel,C.warn],borderWidth:0}]},
     options:{responsive:true,maintainAspectRatio:false,cutout:'62%',
       plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>c.label+': '+fmt(c.parsed)}}}}});
 
@@ -274,15 +281,15 @@ function renderAgeing(gp,k){
   const byAvg=topN(arr,'avg',10);
   destroy('cAvg');
   charts.cAvg=new Chart(el('cAvg'),{type:'bar',data:{labels:byAvg.map(x=>x.by),
-    datasets:[{data:byAvg.map(x=>x.avg),backgroundColor:byAvg.map(x=>x.avg>=15?C.warn:C.steel),borderRadius:4}]},
+    datasets:[{data:byAvg.map(x=>x.avg),backgroundColor:byAvg.map(x=>x.avg>15?C.warn:C.steel),borderRadius:4}]},
     options:baseOpts({indexAxis:'y'})});
 
-  // histogram
-  const ranges=[['0–4',0,4],['5–9',5,9],['10–14',10,14],['15–19',15,19],['20–29',20,29],['30+',30,1e9]];
+  // histogram — day-ranges aligned to the three buckets (0–7 teal, 8–15 steel, 16+ warn)
+  const ranges=[['0–7',0,7],['8–15',8,15],['16–22',16,22],['23–30',23,30],['31+',31,1e9]];
   const counts=ranges.map(r=>gp.filter(g=>g.age>=r[1]&&g.age<=r[2]).length);
   destroy('cHist');
   charts.cHist=new Chart(el('cHist'),{type:'bar',data:{labels:ranges.map(r=>r[0]),
-    datasets:[{data:counts,backgroundColor:ranges.map(r=>r[1]>=15?C.warn:C.teal),borderRadius:4}]},
+    datasets:[{data:counts,backgroundColor:ranges.map(r=>r[1]<=7?C.teal:(r[1]<=15?C.steel:C.warn)),borderRadius:4}]},
     options:baseOpts({})});
 }
 
@@ -307,8 +314,7 @@ function baseOpts(o){
 /* ---- downloads ---- */
 function rowsFor(kind){
   if(kind==='createdBy') return {name:'Created_By_Summary',rows:DATA.createdBy};
-  if(kind==='party')     return {name:'Facility_Summary',rows:DATA.party};
-  if(kind==='others')    return {name:'Others_Unmapped_From_Party',rows:DATA.others};
+  if(kind==='party')     return {name:'Party_Summary',rows:DATA.party};
   return {name:'Detailed_Gatepass_Closure',rows:DATA.detail};
 }
 function dl(kind,type){
