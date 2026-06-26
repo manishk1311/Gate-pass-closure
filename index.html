@@ -159,7 +159,7 @@
 <script>
 const C = { teal:'#0E7C66', warn:'#C2410C', steel:'#2563A8', ink:'#16202B', muted:'#5C6B7A', hair:'#DCE3E9' };
 let DATA = null, charts = {};
-// Bucket labels. Overwritten from the API (meta.buckets) so the dashboard always matches the backend.
+// Bucket labels. Default to 0–7 / 8–15 / >15; overwritten in render() from the backend boundaries.
 let B = { low:'0\u20137 Days', mid:'8\u201315 Days', high:'>15 Days' };
 Chart.defaults.font.family = 'Inter, sans-serif';
 Chart.defaults.color = C.muted;
@@ -206,16 +206,35 @@ function gatepassRows(detail){
 }
 
 function render(d){
-  if(d.meta && d.meta.buckets && d.meta.buckets.low){ B = d.meta.buckets; }   // use backend labels
+  // Bucket boundaries from the backend if present, otherwise the defaults 7 / 15.
+  const b1=(d.meta&&d.meta.b1Max!=null)?+d.meta.b1Max:7;
+  const b2=(d.meta&&d.meta.b2Max!=null)?+d.meta.b2Max:15;
+  // Labels: prefer backend-supplied, else build them from the boundaries.
+  if(d.meta && d.meta.buckets && d.meta.buckets.low){ B = d.meta.buckets; }
+  else { B = { low:'0\u2013'+b1+' Days', mid:(b1+1)+'\u2013'+b2+' Days', high:'>'+b2+' Days' }; }
+
   document.getElementById('dataDate').textContent   = isoDmy(d.meta.dataDate);
   document.getElementById('lastUpdated').textContent= d.meta.lastUpdated||'—';
-  renderKpis(d.kpis);
+
   const gp = gatepassRows(d.detail||[]);
-  renderCreatedBy(gp);
-  renderAgeing(gp,d.kpis);
+
+  // Count the three buckets HERE, from each gatepass's ageing days. This is the source of
+  // truth and avoids depending on any bucket count field in the API payload (which is what
+  // produced the bad "8–15 Days" value). A count only ever increments, so it can't go negative.
+  const bk={ b1, b2, lowCount:0, midCount:0, highCount:0, lowQty:0, midQty:0, highQty:0 };
+  gp.forEach(g=>{
+    if(g.age<=b1){ bk.lowCount++;  bk.lowQty+=g.qty; }
+    else if(g.age<=b2){ bk.midCount++; bk.midQty+=g.qty; }
+    else { bk.highCount++; bk.highQty+=g.qty; }
+  });
+  bk.highPct = gp.length ? +(bk.highCount*100/gp.length).toFixed(1) : 0;
+
+  renderKpis(d.kpis, bk);
+  renderCreatedBy(gp, bk);
+  renderAgeing(gp, bk);
 }
 
-function renderKpis(k){
+function renderKpis(k, bk){
   const cards=[
     {l:'Gatepasses closed yesterday',v:k.closedYesterday,a:''},
     {l:'Total received quantity',v:fmt(k.totalRecvQty),a:''},
@@ -224,10 +243,10 @@ function renderKpis(k){
     {l:'Unique to-party codes',v:k.uniqueToCodes,a:''},
     {l:'Average ageing days',v:k.avgAgeingDays,a:''},
     {l:'Max ageing days',v:k.maxAgeingDays,a:'',sub:'Oldest open-to-close span'},
-    {l:'Gatepasses '+B.low,v:k.lowCount,a:'teal',sub:'Freshest closures'},
-    {l:'Gatepasses '+B.mid,v:k.midCount,a:'steel',sub:'Mid-range closures'},
-    {l:'Gatepasses '+B.high,v:k.highCount,a:'warn',sub:'Aged closures'},
-    {l:B.high+' share',v:k.highPct+'%',a:'warn',gauge:k.highPct}
+    {l:'Gatepasses '+B.low, v:fmt(bk.lowCount), a:'teal', sub:'Freshest closures'},
+    {l:'Gatepasses '+B.mid, v:fmt(bk.midCount), a:'steel',sub:'Mid-range closures'},
+    {l:'Gatepasses '+B.high,v:fmt(bk.highCount),a:'warn', sub:'Aged closures'},
+    {l:B.high+' share', v:bk.highPct+'%', a:'warn', gauge:bk.highPct}
   ];
   document.getElementById('kpiGrid').innerHTML = cards.map(c=>(
     '<div class="kpi '+(c.a?('accent-'+c.a):'')+'">'+
@@ -241,12 +260,12 @@ function renderKpis(k){
 function topN(arr,key,n){return arr.slice().sort((a,b)=>b[key]-a[key]).slice(0,n);}
 function destroy(id){if(charts[id]){charts[id].destroy();}}
 
-function renderCreatedBy(gp){
-  // aggregate per creator, splitting into the three ageing buckets
+function renderCreatedBy(gp, bk){
+  // aggregate per creator, splitting into the three ageing buckets (by ageing days, not labels)
   const by={};
   gp.forEach(g=>{const s=by[g.by]||(by[g.by]={by:g.by,qty:0,count:0,low:0,mid:0,high:0,ageSum:0});
     s.qty+=g.qty;s.count++;s.ageSum+=g.age;
-    if(g.bucket===B.low)s.low++; else if(g.bucket===B.mid)s.mid++; else s.high++;});
+    if(g.age<=bk.b1)s.low++; else if(g.age<=bk.b2)s.mid++; else s.high++;});
   const arr=Object.values(by).map(s=>(s.avg=s.count?+(s.ageSum/s.count).toFixed(1):0,s));
 
   const byQty=topN(arr,'qty',10);
@@ -267,11 +286,11 @@ function renderCreatedBy(gp){
   window._creatorArr=arr;
 }
 
-function renderAgeing(gp,k){
-  // bucket doughnut (three segments)
+function renderAgeing(gp, bk){
+  // bucket doughnut (three segments) — uses the counts computed in render()
   destroy('cBucket');
   charts.cBucket=new Chart(el('cBucket'),{type:'doughnut',
-    data:{labels:[B.low,B.mid,B.high],datasets:[{data:[k.lowCount,k.midCount,k.highCount],
+    data:{labels:[B.low,B.mid,B.high],datasets:[{data:[bk.lowCount,bk.midCount,bk.highCount],
       backgroundColor:[C.teal,C.steel,C.warn],borderWidth:0}]},
     options:{responsive:true,maintainAspectRatio:false,cutout:'62%',
       plugins:{legend:{position:'bottom'},tooltip:{callbacks:{label:c=>c.label+': '+fmt(c.parsed)}}}}});
@@ -281,15 +300,16 @@ function renderAgeing(gp,k){
   const byAvg=topN(arr,'avg',10);
   destroy('cAvg');
   charts.cAvg=new Chart(el('cAvg'),{type:'bar',data:{labels:byAvg.map(x=>x.by),
-    datasets:[{data:byAvg.map(x=>x.avg),backgroundColor:byAvg.map(x=>x.avg>15?C.warn:C.steel),borderRadius:4}]},
+    datasets:[{data:byAvg.map(x=>x.avg),
+      backgroundColor:byAvg.map(x=>x.avg>bk.b2?C.warn:(x.avg>bk.b1?C.steel:C.teal)),borderRadius:4}]},
     options:baseOpts({indexAxis:'y'})});
 
-  // histogram — day-ranges aligned to the three buckets (0–7 teal, 8–15 steel, 16+ warn)
-  const ranges=[['0–7',0,7],['8–15',8,15],['16–22',16,22],['23–30',23,30],['31+',31,1e9]];
+  // histogram — day-ranges aligned to the three buckets
+  const ranges=[['0\u20137',0,7],['8\u201315',8,15],['16\u201322',16,22],['23\u201330',23,30],['31+',31,1e9]];
   const counts=ranges.map(r=>gp.filter(g=>g.age>=r[1]&&g.age<=r[2]).length);
   destroy('cHist');
   charts.cHist=new Chart(el('cHist'),{type:'bar',data:{labels:ranges.map(r=>r[0]),
-    datasets:[{data:counts,backgroundColor:ranges.map(r=>r[1]<=7?C.teal:(r[1]<=15?C.steel:C.warn)),borderRadius:4}]},
+    datasets:[{data:counts,backgroundColor:ranges.map(r=>r[1]>bk.b2?C.warn:(r[1]>bk.b1?C.steel:C.teal)),borderRadius:4}]},
     options:baseOpts({})});
 }
 
